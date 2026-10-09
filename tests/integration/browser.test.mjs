@@ -214,6 +214,18 @@ test('real Chromium: correctness, persisted views, keyboard, phone and overlappi
       assert.notEqual(await button.evaluate(x => getComputedStyle(x).outlineStyle), 'none');
       await page.setViewportSize({width: 375, height: 812}); await clear(); await check();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      const overviewLink = page.getByRole('link', {name: 'Service overview', exact: true});
+      await overviewLink.focus();
+      await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
+      assert.notEqual(await overviewLink.evaluate(x => getComputedStyle(x).outlineStyle), 'none');
+      await overviewLink.press('Enter');
+      await expect(page.locator('#overview')).toBeFocused();
+      assert.equal(await page.evaluate(() => document.querySelector('#overview').getBoundingClientRect().top < document.querySelector('aside').getBoundingClientRect().top), true);
+      await page.getByRole('link', {name: 'Incident list', exact: true}).focus();
+      await page.keyboard.press('Enter'); await expect(page.locator('#incident-list')).toBeFocused();
+      await page.getByRole('link', {name: 'Search and filters', exact: true}).focus();
+      await page.keyboard.press('Enter');
+
       await page.locator('#service').getByLabel('Search', {exact: true}).focus(); await page.keyboard.press('Space'); await check({service: ['Search']});
       await page.locator('#rows button').first().click(); await detail(expected({service: ['Search']}).items[0]); await page.getByRole('button', {name: 'Close details'}).click(); await check({service: ['Search']});
       await page.setViewportSize({width: 1280, height: 900});

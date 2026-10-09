@@ -10,6 +10,7 @@
 <body>
   <a class="skip-link" href="#results">Skip to incidents</a>
   <header class="masthead"><div><p class="eyebrow">Support intelligence · Fictional dataset</p><h1>Incident explorer</h1><p>Find the pattern. Understand the incident.</p></div><button id="export" type="button">Download CSV</button></header>
+  <nav class="view-links" aria-label="Explorer views"><a href="#overview">Service overview</a><a href="#incident-list">Incident list</a><a href="#query-form">Search and filters</a></nav>
   <main>
     <aside aria-label="Explorer controls">
       <form id="query-form">
@@ -27,6 +28,15 @@
     <section id="results" tabindex="-1" aria-labelledby="result-title">
       <div class="section-heading"><div><p class="eyebrow">All matching incidents</p><h2 id="result-title">Results overview</h2></div><span id="freshness" class="muted"></span></div>
       <div id="active-filters" class="chips" aria-label="Active selections"></div>
+      <section id="overview" tabindex="-1" aria-labelledby="overview-title">
+        <h2 id="overview-title">Services needing attention</h2>
+        <p>Across every incident matching your search and filters, including later pages. Services with the most unresolved incidents appear first; ties use service name.</p>
+        <p class="muted">Incident count includes all matches. Unresolved means open or in progress. High severity means critical or high. Average resolution is the mean hours from opening to resolution for resolved incidents only; it is unavailable when none are resolved.</p>
+        <p id="overview-selection" class="muted"></p>
+        <div id="overview-message" class="operation-message"></div>
+        <div id="service-measures" class="service-measures"></div>
+      </section>
+      <h2 id="incident-list" tabindex="-1">Matching incidents</h2>
       <div id="summary" class="summary"></div>
       <section class="chart" aria-labelledby="chart-title"><h3 id="chart-title">Opened by day · UTC</h3><p class="muted">Counts cover the entire matching result.</p><div id="chart-bars" aria-hidden="true"></div><details><summary>Read daily counts</summary><p id="chart-text"></p></details></section>
       <div class="table-controls"><div><label for="sort">Sort by</label><select id="sort"><option value="openedAt">Opened date</option><option value="severity">Severity</option></select></div><div><label for="direction">Order</label><select id="direction"><option value="desc">Newest / highest first</option><option value="asc">Oldest / lowest first</option></select></div><div><label for="page-size">Rows per page</label><select id="page-size"><option value="25">25</option><option value="50">50</option></select></div></div>
