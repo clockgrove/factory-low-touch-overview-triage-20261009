@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createState, transition, savedView, queryParams, canPaginate, announcement} from '../../public/state.js';
+import {createState, transition, savedView, queryParams, canPaginate, announcement, canAddDetail} from '../../public/state.js';
 // Completion events are component inputs, not HTTP response fixtures.
 const result = (state, page = 1, totalPages = 4) => {
   state = transition(state, {type: 'result:start'});
@@ -205,4 +205,54 @@ test('overview announcements remain separate with details, list and overview bef
   assert.equal(announcement(s), 'Loading incident details.');
   s = transition(s, {type: 'intent', patch: {service: ['Billing'], to: '2026-06-29'}});
   assert.equal(announcement(s), ''); assert.equal(s.overviewOp.error, null);
+});
+
+
+test('triage recognition eligibility follows current detail ownership through failures, intent changes and retry', () => {
+  const loaded = {id: 'A', title: 'Loaded details'};
+  const obsoleteWriters = (s, token) => {
+    for (const type of ['detail:success', 'detail:failure', 'detail:finish']) {
+      assert.equal(transition(s, {type, token, data: loaded, error: 'obsolete'}), s);
+    }
+  };
+  for (const change of [{type: 'intent', patch: {q: 'new'}}, {type: 'address', intent: {q: 'new'}}, {type: 'restore', view: {q: 'new'}}, {type: 'detail:close'}, {type: 'detail:select', id: 'B'}]) {
+    let s = result(createState()); const snapshot = s.result;
+    s = transition(s, {type: 'detail:select', id: 'A'});
+    assert.equal(canAddDetail(s), false);
+    s = transition(s, {type: 'detail:start'}); const old = s.detail.token;
+    assert.equal(canAddDetail(s), false);
+    s = transition(s, {type: 'detail:success', token: old, data: loaded});
+    assert.equal(canAddDetail(s), true);
+    s = transition(s, change);
+    assert.equal(canAddDetail(s), false); obsoleteWriters(s, old);
+    assert.equal(s.result, snapshot);
+    s = transition(s, {type: 'detail:select', id: 'B'});
+    s = transition(s, {type: 'detail:start'}); const failed = s.detail.token;
+    s = transition(s, {type: 'detail:failure', token: failed, error: 'Current failure'});
+    obsoleteWriters(s, old); assert.equal(canAddDetail(s), false);
+    assert.equal(s.detail.error, 'Current failure');
+    s = transition(s, {type: 'detail:start'});
+    obsoleteWriters(s, old); obsoleteWriters(s, failed);
+    assert.equal(s.detail.pending, true); assert.equal(s.detail.error, null);
+    s = transition(s, {type: 'detail:success', token: s.detail.token, data: {id: 'B'}});
+    assert.equal(canAddDetail(s), true);
+  }
+});
+
+test('visit triage edits and failed persistence preserve closed details and independent search snapshots', async () => {
+  const {addIncident, editNote, removeIncident, persistTriage} = await import('../../public/triage.js');
+  let s = result(createState()); const snapshot = s.result, intent = s.intent;
+  s = transition(s, {type: 'detail:select', id: 'A'});
+  s = transition(s, {type: 'detail:start'}); const token = s.detail.token;
+  const incident = {id: 'A', title: 'Recognition', service: 'Billing', severity: 'high', status: 'open', openedAt: '2026-04-01T00:00:00.000Z'};
+  s = transition(s, {type: 'detail:success', token, data: incident});
+  let entries = addIncident([], s.detail.data);
+  s = transition(s, {type: 'detail:close'}); const closed = s;
+  entries = editNote(entries, 'A', '  <b>literal & text</b>  ');
+  assert.match(persistTriage(undefined, entries).warning, /Triage could not be saved/);
+  assert.equal(entries[0].note, '  <b>literal & text</b>  ');
+  for (const type of ['detail:success', 'detail:failure', 'detail:finish']) assert.equal(transition(s, {type, token, data: incident, error: 'old'}), closed);
+  assert.equal(canAddDetail(s), false); assert.equal(s.result, snapshot); assert.equal(s.intent, intent);
+  entries = removeIncident(entries, 'A');
+  assert.equal(addIncident(entries, incident)[0].note, '');
 });

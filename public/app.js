@@ -1,4 +1,6 @@
-import {createState, transition, queryParams, savedView, announcement, isResultCurrent, canPaginate, addressIntent, isOverviewCurrent} from './state.js';
+import {createState, transition, queryParams, savedView, announcement, isResultCurrent, canPaginate, addressIntent, isOverviewCurrent, canAddDetail} from './state.js';
+
+import {loadTriage, persistTriage, addIncident, removeIncident, editNote} from './triage.js';
 
 const $ = id => document.getElementById(id);
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
@@ -11,7 +13,7 @@ function writeAddress(method) {
 }
 writeAddress('replaceState');
 let resultController, detailController, exportController, overviewController;
-let returnIncident = null, returnElement = null;
+let returnIncident = null, returnElement = null, returnFallback = 'results';
 let renderedResult, renderedBlocked, renderedDetail, renderedIntent;
 const storageKey = 'incident-explorer.views.v1';
 let views = [];
@@ -20,10 +22,15 @@ try {
   if (Array.isArray(stored)) views = stored.filter(v => v && typeof v.name === 'string' && v.view && typeof v.view === 'object').map(v => ({name: v.name.slice(0, 80), view: savedView(v.view)}));
 } catch { $('storage-message').textContent = 'Saved views could not be read. You can still explore incidents.'; }
 
+// Access itself can throw (for example when storage is blocked by the browser).
+const triageStorage = () => { try { return window.localStorage; } catch { return undefined; } };
+let {entries: triageEntries, warning: triageWarning} = loadTriage(triageStorage());
+const triageRows = new Map();
+
 function dispatch(event) { const next = transition(state, event); if (next === state) return; state = next; render(); }
 function restoreFocus() {
   const button = [...$('rows').querySelectorAll('button')].find(b => b.dataset.incident === returnIncident);
-  const target = button && !button.disabled ? button : returnElement?.isConnected && !returnElement.disabled ? returnElement : $('results');
+  const target = button && !button.disabled ? button : returnElement?.isConnected && !returnElement.disabled ? returnElement : $(returnFallback);
   target.focus();
 }
 function closeDetail() {
@@ -76,6 +83,7 @@ async function loadOverview() {
   finally { dispatch({type: 'overview:finish', token}); }
 }
 async function loadDetail() {
+  if (!state.detail.id) return;
   detailController?.abort();
   const controller = detailController = new AbortController();
   dispatch({type: 'detail:start'});
@@ -157,7 +165,7 @@ function renderSnapshot() {
       const row = node('tr'), cell = node('td'), button = node('button', undefined, 'incident-link');
       button.type = 'button'; button.dataset.incident = item.id; button.disabled = blocked;
       button.append(node('span', item.id), document.createTextNode(item.title));
-      button.addEventListener('click', () => { returnIncident = item.id; returnElement = button; dispatch({type: 'detail:select', id: item.id}); loadDetail(); });
+      button.addEventListener('click', () => openDetail(item.id, button, 'results'));
       cell.append(button); row.append(cell, node('td', item.service));
       const severity = node('td'); severity.append(node('span', human(item.severity), `badge ${item.severity}`)); row.append(severity, node('td', human(item.status)), node('td', utc(item.openedAt))); $('rows').append(row);
     }
@@ -170,6 +178,8 @@ function renderSnapshot() {
 function renderDetail() {
   const detail = state.detail, dialog = $('detail');
   if (!detail.id) { renderedDetail = null; if (dialog.open) { dialog.close(); restoreFocus(); } return; }
+  const add = $('add-triage');
+  if (add) add.disabled = !canAddDetail(state) || triageEntries.some(entry => entry.id === detail.id);
   if (renderedDetail && ['token', 'id', 'pending', 'data', 'error'].every(key => renderedDetail[key] === detail[key])) return;
   const contentHadFocus = $('detail-content').contains(document.activeElement);
   renderedDetail = detail;
@@ -183,7 +193,15 @@ function renderDetail() {
       const value = detail.data[key];
       fields.append(node('dt', label), node('dd', key.endsWith('At') ? utc(value) : Array.isArray(value) ? value.join(', ') || 'None' : key === 'status' ? human(value) : String(value ?? '—')));
     }
-    $('detail-content').append(fields);
+    const add = node('button', `Add ${detail.id} to triage`);
+    add.id = 'add-triage'; add.type = 'button';
+    add.disabled = !canAddDetail(state) || triageEntries.some(entry => entry.id === detail.id);
+    const token = detail.token, data = detail.data;
+    add.addEventListener('click', () => {
+      if (state.detail.token !== token || state.detail.data !== data || !canAddDetail(state)) return;
+      commitTriage(addIncident(triageEntries, data));
+    });
+    $('detail-content').append(fields, add);
   }
   if (!dialog.open) { dialog.showModal(); $('close-detail').focus(); }
   else if (contentHadFocus) $('close-detail').focus();
@@ -204,6 +222,48 @@ function renderOverview() {
     card.append(node('h3', service.service));
     for (const [label, value] of [['Incident count', service.incidentCount], ['Unresolved', service.unresolvedCount], ['Critical or high severity', service.highSeverityCount], ['Average resolution · hours', service.averageResolutionHours === null ? 'Unavailable — no resolved incidents' : service.averageResolutionHours.toLocaleString(undefined, {maximumFractionDigits: 2})]]) measures.append(node('dt', label), node('dd', typeof value === 'number' ? value.toLocaleString() : value));
     card.append(measures); $('service-measures').append(card);
+  }
+}
+function openDetail(id, opener, fallback) {
+  returnIncident = fallback === 'results' ? id : null;
+  returnElement = opener; returnFallback = fallback;
+  dispatch({type: 'detail:select', id}); loadDetail();
+}
+function commitTriage(entries) {
+  // Commit the usable visit state before attempting persistence.
+  triageEntries = entries;
+  triageWarning = persistTriage(triageStorage(), triageEntries).warning;
+  renderTriage(); renderDetail();
+}
+function renderTriage() {
+  $('triage-storage-message').textContent = triageWarning || '';
+  $('triage-empty').hidden = triageEntries.length > 0;
+  const ids = new Set(triageEntries.map(entry => entry.id));
+  for (const [id, row] of triageRows) if (!ids.has(id)) { row.remove(); triageRows.delete(id); }
+  for (const entry of triageEntries) {
+    let row = triageRows.get(entry.id);
+    if (!row) {
+      row = node('li', undefined, 'triage-entry'); row.dataset.triageId = entry.id;
+      row.append(node('h3', `${entry.id} · ${entry.title}`), node('p', `${entry.service} · ${human(entry.severity)} · ${human(entry.status)} · Opened ${utc(entry.openedAt)}`, 'muted'));
+      const actions = node('div', undefined, 'triage-actions');
+      const open = node('button', `Open details for ${entry.id}`, 'secondary');
+      const remove = node('button', `Remove ${entry.id} from triage`, 'secondary');
+      open.type = remove.type = 'button';
+      open.addEventListener('click', () => openDetail(entry.id, open, 'triage'));
+      remove.addEventListener('click', () => {
+        const hadFocus = row.contains(document.activeElement);
+        commitTriage(removeIncident(triageEntries, entry.id));
+        if (hadFocus) $('triage').focus();
+      });
+      actions.append(open, remove);
+      const label = node('label', `Note for ${entry.id}`), editor = node('textarea');
+      editor.id = `triage-note-${entry.id}`; label.htmlFor = editor.id; editor.rows = 3;
+      editor.addEventListener('input', () => commitTriage(editNote(triageEntries, entry.id, editor.value)));
+      row.append(actions, label, editor); triageRows.set(entry.id, row);
+      $('triage-list').append(row);
+    }
+    const editor = row.querySelector('textarea');
+    if (editor.value !== entry.note) editor.value = entry.note;
   }
 }
 function render() {
@@ -253,4 +313,4 @@ $('detail').addEventListener('cancel', event => { event.preventDefault(); closeD
 $('save-form').addEventListener('submit', event => { event.preventDefault(); const name = $('view-name').value.trim(); if (!name) { $('view-name').setCustomValidity('Enter a view name.'); $('view-name').reportValidity(); return; } views.push({name, view: savedView(state.intent)}); persistViews(); renderViews(); $('view-name').value = ''; });
 $('view-name').addEventListener('input', () => $('view-name').setCustomValidity(''));
 window.addEventListener('popstate', () => change({type: 'address', intent: addressIntent(new URLSearchParams(location.search))}));
-renderViews(); render(); loadResults(); loadOverview();
+renderViews(); renderTriage(); render(); loadResults(); loadOverview();
