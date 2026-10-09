@@ -17,6 +17,12 @@ Saved views remember the search, facets, UTC dates, sort direction and page size
 
 Download CSV exports all matching incidents in the selected order. The header contains all eleven dataset fields. Null `resolvedAt` values become empty cells; `tags` contains a JSON array of strings. CSV uses CRLF record separators and double-quoted cells with doubled internal quotes where needed, preserving commas, quotes and description line breaks.
 
+The read-only `GET /api/overview` API compares services across the entire filtered result, including incidents on later pages. It accepts the same search, facets, inclusive UTC dates and validated presentation parameters as `/api/incidents`. Sorting, direction, page and page size do not change its measures or service order. It returns `{total,services}`; only services with matches appear, ordered by unresolved count descending, then service name ascending. No matches returns `{total:0,services:[]}`. See `server/README.md` for the response fields and query contract.
+
+Each service's incident count is the number of matching incidents. Unresolved count includes open and in-progress incidents. High-severity count includes critical and high incidents, regardless of status. Average resolution hours measures the elapsed time from opening to resolution, averaged over resolved incidents only. Open and in-progress incidents do not contribute. The API returns the unrounded mean, or `null` (unavailable) when a service has no resolved incidents; unavailable does not mean zero hours.
+
+Backend overview tests make actual loopback HTTP requests and calculate expected measures independently from canonical data. They cover combined filters spanning pages, UTC boundaries, presentation-parameter invariance, unavailable averages, service-name ties, empty results and shared validation errors. Existing incident, details, export and startup regression checks remain in the suite.
+
 For verification in the supplied qualification environment, run these commands in order from this checkout:
 
 ```sh
