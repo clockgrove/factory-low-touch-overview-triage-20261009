@@ -33,3 +33,30 @@ export function parseCSV(text) {
   assert.equal(quoted, false); assert.equal(cell, ''); assert.deepEqual(row, []);
   return result;
 }
+
+// Independent overview oracle: per-service subsets and numeric UTC bounds.
+// Presentation fields deliberately do not enter this calculation.
+export function expectedOverview(options = {}) {
+  const matches = rows.filter(row => {
+    if (options.q && ![row.id, row.title, row.description].some(text => text.toUpperCase().includes(options.q.toUpperCase()))) return false;
+    for (const facet of ['service', 'status', 'severity']) {
+      if (options[facet]?.length && !options[facet].includes(row[facet])) return false;
+    }
+    const opened = new Date(row.openedAt).getTime();
+    return (!options.from || opened >= Date.parse(`${options.from}T00:00:00Z`)) &&
+      (!options.to || opened < Date.parse(`${options.to}T00:00:00Z`) + 86400000);
+  });
+  const services = [...new Set(matches.map(row => row.service))].map(service => {
+    const subset = matches.filter(row => row.service === service);
+    const resolved = subset.filter(row => row.status === 'resolved');
+    const hours = resolved.map(row => (new Date(row.resolvedAt) - new Date(row.openedAt)) / 3600000);
+    return {
+      service, incidentCount: subset.length,
+      unresolvedCount: subset.filter(row => row.status === 'open' || row.status === 'in_progress').length,
+      highSeverityCount: subset.filter(row => ['critical', 'high'].includes(row.severity)).length,
+      averageResolutionHours: hours.length ? hours.reduce((sum, value) => sum + value, 0) / hours.length : null,
+    };
+  });
+  services.sort((a, b) => b.unresolvedCount - a.unresolvedCount || a.service.localeCompare(b.service, 'en'));
+  return {total: matches.length, services};
+}
