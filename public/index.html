@@ -10,7 +10,7 @@
 <body>
   <a class="skip-link" href="#results">Skip to incidents</a>
   <header class="masthead"><div><p class="eyebrow">Support intelligence · Fictional dataset</p><h1>Incident explorer</h1><p>Find the pattern. Understand the incident.</p></div><button id="export" type="button">Download CSV</button></header>
-  <nav class="view-links" aria-label="Explorer views"><a href="#overview">Service overview</a><a href="#incident-list">Incident list</a><a href="#query-form">Search and filters</a></nav>
+  <nav class="view-links" aria-label="Explorer views"><a href="#overview">Service overview</a><a href="#incident-list">Incident list</a><a href="#triage">Personal triage</a><a href="#query-form">Search and filters</a></nav>
   <main>
     <aside aria-label="Explorer controls">
       <form id="query-form">
@@ -43,6 +43,13 @@
       <div id="result-message" class="operation-message"></div>
       <div class="table-wrap"><table><caption class="sr-only">Matching incidents. Open an incident for complete details.</caption><thead><tr><th scope="col">Incident</th><th scope="col">Service</th><th scope="col">Severity</th><th scope="col">Status</th><th scope="col">Opened · UTC</th></tr></thead><tbody id="rows"></tbody></table></div>
       <nav class="pagination" aria-label="Result pages"><button id="previous" class="secondary" type="button">Previous</button><span id="page-label"></span><button id="next" class="secondary" type="button">Next</button></nav>
+      <section id="triage" tabindex="-1" aria-labelledby="triage-title">
+        <h2 id="triage-title">Personal triage</h2>
+        <p>Keep incidents and plain-text notes for your investigation in this browser. These do not change incidents or your search.</p>
+        <p id="triage-storage-message" class="operation-message" role="status"></p>
+        <p id="triage-empty" class="muted">No triage entries yet. Open complete incident details to add one.</p>
+        <ol id="triage-list"></ol>
+      </section>
       <div id="export-message" class="operation-message"></div>
     </section>
   </main>

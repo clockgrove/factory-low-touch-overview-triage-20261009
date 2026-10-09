@@ -141,7 +141,7 @@ test('overview real Chromium: canonical selection, overlap failure/retry, keyboa
     await t.test('keyboard reaches both views, shows focus and reads every measure on a narrow screen', async () => {
       await page.setViewportSize({width: 375, height: 812});
       await page.goto(`http://127.0.0.1:${port}/`); await check(); await listReady();
-      for (const [name, id] of [['Service overview', 'overview'], ['Incident list', 'incident-list'], ['Search and filters', 'query-form']]) {
+      for (const [name, id] of [['Service overview', 'overview'], ['Incident list', 'incident-list'], ['Personal triage', 'triage'], ['Search and filters', 'query-form']]) {
         const link = page.getByRole('link', {name, exact: true});
         await link.focus();
         const focus = await link.evaluate(element => ({active: element === document.activeElement, style: getComputedStyle(element).outlineStyle, width: getComputedStyle(element).outlineWidth}));

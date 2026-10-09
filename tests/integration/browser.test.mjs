@@ -210,7 +210,26 @@ test('real Chromium: correctness, persisted views, keyboard, phone and overlappi
     await t.test('keyboard details expose all fields, focus and results return; phone controls fit', async () => {
       await search('inc-000001'); await check({q: 'inc-000001'});
       const button = page.locator('#rows button').first(); await button.focus(); await button.press('Enter'); await detail(rows[0]);
+      const add = page.getByRole('button', {name: 'Add INC-000001 to triage', exact: true});
+      await add.click(); await expect(add).toBeDisabled();
+      await expect(page.locator('#triage-list [data-triage-id]')).toHaveCount(1);
       await page.keyboard.press('Escape'); await expect(page.locator('#detail')).not.toBeVisible(); await expect(button).toBeFocused(); await check({q: 'inc-000001'});
+      const note = page.getByLabel('Note for INC-000001', {exact: true});
+      await note.fill('  <b>literal & text</b>  ');
+      const editor = await note.elementHandle();
+      const reopen = page.getByRole('button', {name: 'Open details for INC-000001', exact: true});
+      const address = page.url();
+      await reopen.focus(); await reopen.press('Enter'); await detail(rows[0]);
+      assert.equal(page.url(), address);
+      await page.keyboard.press('Escape'); await expect(reopen).toBeFocused();
+      await expect(note).toHaveValue('  <b>literal & text</b>  ');
+      await check({q: 'inc-000001'});
+      assert.equal(await editor.evaluate(x => x === document.querySelector('#triage-list textarea')), true);
+      await editor.dispose();
+      await page.getByRole('button', {name: 'Remove INC-000001 from triage', exact: true}).click();
+      await expect(page.locator('#triage-list [data-triage-id]')).toHaveCount(0);
+      await expect(page.locator('#triage')).toBeFocused();
+      await button.focus(); await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
       assert.notEqual(await button.evaluate(x => getComputedStyle(x).outlineStyle), 'none');
       await page.setViewportSize({width: 375, height: 812}); await clear(); await check();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

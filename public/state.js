@@ -53,6 +53,11 @@ export function createState() {
 export function isResultCurrent(state) {
   return !!state.result && JSON.stringify(state.intent) === JSON.stringify(state.result.intent);
 }
+// Only the successfully loaded selection may supply a recognition snapshot.
+export function canAddDetail(state) {
+  const {id, data, pending, error} = state.detail;
+  return !!id && !pending && !error && data?.id === id;
+}
 export function canPaginate(state) {
   return !state.resultOp.pending && isResultCurrent(state) && state.result.data.totalPages > 0;
 }
