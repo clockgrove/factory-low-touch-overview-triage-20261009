@@ -137,3 +137,72 @@ test('addresses normalize singleton ambiguity, real UTC dates, numbers and liter
   assert.deepEqual(addressIntent(queryParams(intent)), intent);
   assert.equal(transition(createState(), {type: 'intent', patch: {q: ''}}).resultOp.token, 0);
 });
+
+const overviewData = {total: 2, services: [{service: 'Billing', incidentCount: 2, unresolvedCount: 1, highSeverityCount: 2, averageResolutionHours: null}]};
+const overviewReady = state => {
+  state = transition(state, {type: 'overview:start'});
+  return transition(state, {type: 'overview:success', token: state.overviewOp.token, data: overviewData});
+};
+test('overview older success, failure and cleanup cannot replace a newer failed selection or its retry', async () => {
+  const {isOverviewCurrent} = await import('../../public/state.js');
+  let s = overviewReady(createState()); const snapshot = s.overview;
+  s = transition(s, {type: 'intent', patch: {q: 'Billing'}});
+  s = transition(s, {type: 'overview:start'}); const old = s.overviewOp.token;
+  s = transition(s, {type: 'intent', patch: {q: 'Search', status: ['open'], from: '2026-04-01'}});
+  s = transition(s, {type: 'overview:start'}); const failed = s.overviewOp.token;
+  s = transition(s, {type: 'overview:failure', token: failed, error: 'Current overview failed'});
+  assert.equal(announcement(s), 'Overview: Current overview failed');
+  assert.equal(s.overview, snapshot); assert.equal(isOverviewCurrent(s), false);
+  for (const type of ['overview:success', 'overview:failure', 'overview:finish']) assert.equal(transition(s, {type, token: old, data: overviewData, error: 'obsolete'}), s);
+  s = transition(s, {type: 'overview:start'});
+  assert.equal(s.overviewOp.error, null); assert.equal(s.overviewOp.pending, true);
+  assert.equal(s.overviewIntent.q, 'Search'); assert.deepEqual(s.overviewIntent.status, ['open']);
+  for (const token of [old, failed]) for (const type of ['overview:success', 'overview:failure', 'overview:finish']) assert.equal(transition(s, {type, token, data: overviewData, error: 'obsolete'}), s);
+  const data = {total: 0, services: []};
+  s = transition(s, {type: 'overview:success', token: s.overviewOp.token, data});
+  assert.equal(s.overview.data, data); assert.equal(s.overview.intent, s.overviewIntent);
+  assert.equal(isOverviewCurrent(s), true); assert.equal(s.overviewOp.pending, false);
+});
+test('overview history and saved recall supersede every writer even when returning to the same filters', () => {
+  for (const event of [{type: 'address', intent: {q: 'saved', page: 3}}, {type: 'restore', view: {q: 'saved', pageSize: 50}}]) {
+    let s = transition(createState(), {type: 'intent', patch: {q: 'saved'}});
+    s = overviewReady(s); const snapshot = s.overview;
+    s = transition(s, {type: 'overview:start'}); const old = s.overviewOp.token;
+    s = transition(s, {type: 'overview:failure', token: old, error: 'Earlier failure'});
+    s = transition(s, event);
+    assert.equal(s.overviewOp.error, null); assert.equal(s.overview, snapshot);
+    s = transition(s, {type: 'overview:start'});
+    for (const type of ['overview:success', 'overview:failure', 'overview:finish']) assert.equal(transition(s, {type, token: old, data: overviewData, error: 'Earlier failure'}), s);
+    assert.equal(s.overviewOp.pending, true); assert.equal(s.overviewIntent.q, 'saved');
+  }
+});
+test('pagination, size and sorting retain overview snapshot, pending ownership and failed retry meaning', async () => {
+  const {isOverviewCurrent} = await import('../../public/state.js');
+  for (const event of [{type: 'page', delta: 1}, {type: 'intent', patch: {pageSize: 50}}, {type: 'intent', patch: {sort: 'severity', direction: 'asc'}}]) {
+    let s = overviewReady(result(createState())); const snapshot = s.overview;
+    s = transition(s, {type: 'overview:start'}); const op = s.overviewOp;
+    s = transition(s, event);
+    assert.equal(s.overview, snapshot); assert.equal(s.overviewOp, op); assert.equal(isOverviewCurrent(s), true);
+    s = transition(s, {type: 'overview:failure', token: op.token, error: 'Overview failed'});
+    const intent = s.overviewIntent;
+    s = transition(s, {type: 'overview:start'});
+    assert.deepEqual(s.overviewIntent, intent);
+    s = transition(s, {type: 'overview:success', token: s.overviewOp.token, data: overviewData});
+    assert.equal(isOverviewCurrent(s), true);
+  }
+});
+test('overview announcements remain separate with details, list and overview before export', () => {
+  let s = transition(createState(), {type: 'overview:start'});
+  s = transition(s, {type: 'overview:failure', token: s.overviewOp.token, error: 'Measures unavailable'});
+  s = transition(s, {type: 'export:start'});
+  assert.equal(announcement(s), 'Overview: Measures unavailable');
+  s = transition(s, {type: 'result:start'});
+  assert.equal(announcement(s), 'Loading results.');
+  s = transition(s, {type: 'result:failure', token: s.resultOp.token, error: 'List failed'});
+  assert.equal(announcement(s), 'List failed');
+  s = transition(s, {type: 'detail:select', id: 'A'});
+  s = transition(s, {type: 'detail:start'});
+  assert.equal(announcement(s), 'Loading incident details.');
+  s = transition(s, {type: 'intent', patch: {service: ['Billing'], to: '2026-06-29'}});
+  assert.equal(announcement(s), ''); assert.equal(s.overviewOp.error, null);
+});

@@ -1,4 +1,4 @@
-import {createState, transition, queryParams, savedView, announcement, isResultCurrent, canPaginate, addressIntent} from './state.js';
+import {createState, transition, queryParams, savedView, announcement, isResultCurrent, canPaginate, addressIntent, isOverviewCurrent} from './state.js';
 
 const $ = id => document.getElementById(id);
 const node = (tag, text, className) => { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; };
@@ -10,7 +10,7 @@ function writeAddress(method) {
   history[method](null, '', `${location.pathname}?${queryParams(state.intent)}${location.hash}`);
 }
 writeAddress('replaceState');
-let resultController, detailController, exportController;
+let resultController, detailController, exportController, overviewController;
 let returnIncident = null, returnElement = null;
 let renderedResult, renderedBlocked, renderedDetail, renderedIntent;
 const storageKey = 'incident-explorer.views.v1';
@@ -35,10 +35,12 @@ function change(event) {
   if (next === state) return;
   $('to').setCustomValidity('');
   resultController?.abort(); detailController?.abort(); exportController?.abort();
+  const overviewChanged = next.overviewOp !== state.overviewOp;
+  if (overviewChanged) overviewController?.abort();
   state = next;
   if (event.type === 'address') { $('search').value = state.intent.q; renderedIntent = undefined; writeAddress('replaceState'); }
   else writeAddress('pushState');
-  render(); loadResults();
+  render(); loadResults(); if (overviewChanged) loadOverview();
 }
 async function checked(response) {
   if (response.ok) return response;
@@ -60,6 +62,18 @@ async function loadResults() {
     if (ownsResult) writeAddress('replaceState');
   } catch (error) { if (error.name !== 'AbortError') dispatch({type: 'result:failure', token, error: errorText(error)}); }
   finally { dispatch({type: 'result:finish', token}); }
+}
+async function loadOverview() {
+  overviewController?.abort();
+  const controller = overviewController = new AbortController();
+  dispatch({type: 'overview:start'});
+  const token = state.overviewOp.token;
+  const params = queryParams(state.overviewIntent, {pagination: false});
+  try {
+    const response = await checked(await fetch(`/api/overview?${params}`, {signal: controller.signal}));
+    dispatch({type: 'overview:success', token, data: await response.json()});
+  } catch (error) { if (error.name !== 'AbortError') dispatch({type: 'overview:failure', token, error: errorText(error)}); }
+  finally { dispatch({type: 'overview:finish', token}); }
 }
 async function loadDetail() {
   detailController?.abort();
@@ -174,8 +188,26 @@ function renderDetail() {
   if (!dialog.open) { dialog.showModal(); $('close-detail').focus(); }
   else if (contentHadFocus) $('close-detail').focus();
 }
+let renderedOverview;
+function renderOverview() {
+  const current = isOverviewCurrent(state), op = state.overviewOp;
+  $('overview').setAttribute('aria-busy', String(op.pending));
+  $('overview').dataset.stale = String(!current && !!state.overview);
+  const describe = intent => Object.entries(intent).flatMap(([key, value]) => Array.isArray(value) ? value.map(v => `${human(key)}: ${human(v)}`) : value ? [`${human(key)}: ${value}`] : []).join(' · ') || 'No search or filters';
+  $('overview-selection').textContent = `Requested: ${describe(state.overviewIntent)}${state.overview ? ` — ${current ? 'Completed for these filters' : `Previous overview: ${describe(state.overview.intent)}`}` : ''}`;
+  operationMessage($('overview-message'), op.error || (op.pending ? (state.overview ? 'Updating overview. Completed measures below are from the labeled filters.' : 'Loading service overview…') : !state.overview ? 'Overview has not loaded.' : !current ? 'Previous overview shown; current filters have not completed.' : !state.overview.data.total ? 'No services match these filters. Try clearing a filter or changing your search.' : ''), op.error ? loadOverview : null, !!op.error);
+  if (renderedOverview === state.overview) return;
+  renderedOverview = state.overview;
+  $('service-measures').replaceChildren();
+  for (const service of state.overview?.data.services || []) {
+    const card = node('article', undefined, 'service-card'), measures = node('dl');
+    card.append(node('h3', service.service));
+    for (const [label, value] of [['Incident count', service.incidentCount], ['Unresolved', service.unresolvedCount], ['Critical or high severity', service.highSeverityCount], ['Average resolution · hours', service.averageResolutionHours === null ? 'Unavailable — no resolved incidents' : service.averageResolutionHours.toLocaleString(undefined, {maximumFractionDigits: 2})]]) measures.append(node('dt', label), node('dd', typeof value === 'number' ? value.toLocaleString() : value));
+    card.append(measures); $('service-measures').append(card);
+  }
+}
 function render() {
-  renderControls(); renderSnapshot(); renderDetail();
+  renderControls(); renderSnapshot(); renderOverview(); renderDetail();
   $('export').disabled = state.exportOp.pending;
   operationMessage($('export-message'), state.exportOp.error || (state.exportOp.pending ? 'Preparing a CSV of all matching incidents…' : ''), state.exportOp.error ? exportCSV : null, !!state.exportOp.error);
   $('announcement').textContent = announcement(state);
@@ -221,4 +253,4 @@ $('detail').addEventListener('cancel', event => { event.preventDefault(); closeD
 $('save-form').addEventListener('submit', event => { event.preventDefault(); const name = $('view-name').value.trim(); if (!name) { $('view-name').setCustomValidity('Enter a view name.'); $('view-name').reportValidity(); return; } views.push({name, view: savedView(state.intent)}); persistViews(); renderViews(); $('view-name').value = ''; });
 $('view-name').addEventListener('input', () => $('view-name').setCustomValidity(''));
 window.addEventListener('popstate', () => change({type: 'address', intent: addressIntent(new URLSearchParams(location.search))}));
-renderViews(); render(); loadResults();
+renderViews(); render(); loadResults(); loadOverview();
