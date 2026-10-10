@@ -40,16 +40,34 @@ Exploration stays available. On phones, the retained landing shows operational
 overview cards first, incident results next and reachable triage after the list,
 before filters; labeled links and visible focus support keyboard navigation.
 
-Required finite browser verification adds two triage IDs in order, repeated add,
-literal note editing, reload, reopen preserving search, removal clearing notes,
-empty-note re-add, malformed storage, keyboard and narrow-screen journeys.
-Retain inherited HTTP, overview, selection and failure/retry proof. Exercise
-unavailable storage when feasible; otherwise report the exact environment
-limitation and unexercised condition alongside source robustness review.
-This documentation update does not certify the parallel browser suite. Final
-integrated QA checks the finished suite and reported limitations, distinguishes
-real exercised behavior from tooling qualification, and confirms cleanup of
-all real servers and browsers.
+The complete `npm test` suite passed locally with 79 tests and no failures,
+cancellations or skips after preparation and the unchanged smoke probe.
+`tests/integration/triage-browser.test.mjs` is the discoverable browser entry
+point. Its **quota denies triage writes before reversed-order adds and literal
+visit investigation** subtest exhausts native localStorage in the running
+loopback application's sandbox-enabled Chromium context. Native `setItem`
+throws `QuotaExceededError` for the exact `incident-explorer.triage.v1` key
+and `{version:1,entries}` envelope before additions and after literal note edits.
+Reads remain available and the key remains absent. This verifies quota/write
+denial; it does not establish storage getter or read denial. Production storage
+APIs and application HTTP responses are unchanged.
+
+During denial, search rows and whole-result totals, all eleven detail fields,
+two incidents added in reverse result order, recognition fields, duplicate
+prevention, focus return and literal notes through further searches/details
+remain usable. The visible message says: “Triage could not be saved to browser
+storage. Your current triage remains usable for this visit.” Membership and
+notes remain in memory for this visit; do not rely on reload or page-close
+persistence during denial. Normal-storage reload, removal/empty-note re-add,
+malformed-data recovery, keyboard, overview-first phone layout and inherited
+HTTP, overview, selection and failure/retry checks also pass. Quota recovery
+and reload checks occur after filler removal restores writes.
+
+Browser storage getter denial, `getItem` denial and other browser-policy or
+storage-failure conditions were not induced. Source catches and component
+tests assess unavailable/throwing storage separately, without certifying those
+browser conditions. Preparation and smoke qualify tooling only; these local
+suite results do not transfer independent acceptance to other environments.
 
 `/api/incidents` accepts literal case-insensitive `q` over ID, title and
 description; repeated `service`, `status` and `severity`; inclusive UTC
