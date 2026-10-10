@@ -205,6 +205,96 @@ test('finite real Chromium triage: persistence, recovery, keyboard, phone and re
       }
     });
 
+    await t.test('quota denies triage writes before reversed-order adds and literal visit investigation', {timeout: 30000}, async () => {
+      await page.evaluate(key => localStorage.removeItem(key), TRIAGE_STORAGE_KEY);
+      await page.goto(`http://127.0.0.1:${port}/?q=incident`); await ready();
+      assert.deepEqual(await ids(), []);
+      const address = page.url();
+      const literal = '  <script>window.triageInjected=true</script> & "quotes"\n雪  ';
+      const edited = '  <img src=x onerror="window.triageInjected=true"> & **visit edit**\nline two  ';
+      const denied = async entries => {
+        // Exercise the exact production key/envelope with native setItem. Failure
+        // must leave the readable key absent, not merely fail a filler write.
+        const proof = await page.evaluate(({key, entries}) => {
+          const before = localStorage.getItem(key);
+          let name = null;
+          try { localStorage.setItem(key, JSON.stringify({version: 1, entries})); }
+          catch (error) { name = error.name; }
+          return {name, before, after: localStorage.getItem(key)};
+        }, {key: TRIAGE_STORAGE_KEY, entries});
+        assert.deepEqual(proof, {name: 'QuotaExceededError', before: null, after: null});
+      };
+      const results = async q => {
+        const {items, summary} = expected({q});
+        assert.deepEqual(await page.locator('#rows button').evaluateAll(nodes => nodes.map(node => node.dataset.incident)), items.slice(0, 25).map(row => row.id));
+        assert.deepEqual(await page.locator('#summary strong').allTextContents(), [summary.total, summary.unresolved, summary.highSeverity].map(n => n.toLocaleString('en-US')));
+      };
+      try {
+        const quota = await page.evaluate(() => {
+          let count = 0, name = null;
+          // Finite coarse fill, then consume residual space with smaller native
+          // writes so even a new recognition envelope cannot fit.
+          for (let size = 1024; size >= 1; size = Math.floor(size / 2)) {
+            for (let attempt = 0; attempt < 6000; attempt++) {
+              try { localStorage.setItem(`triage-visit-fill-${count}`, 'x'.repeat(size)); count++; }
+              catch (error) { name = error.name; break; }
+            }
+          }
+          return {count, name};
+        });
+        assert.equal(quota.name, 'QuotaExceededError');
+        assert.ok(quota.count > 0 && quota.count < 66000);
+        await denied([recognition(first)]);
+        await search('Billing'); await results('Billing');
+        await search('incident'); await results('incident');
+        await addFromResults(first);
+        assert.deepEqual(await ids(), [first.id]);
+        assert.equal(await page.locator('#triage-storage-message').isVisible(), true);
+        assert.equal(await page.locator('#triage-storage-message').textContent(), 'Triage could not be saved to browser storage. Your current triage remains usable for this visit.');
+        await note(first.id).fill(literal);
+        await denied([recognition(first, literal)]);
+        await addFromResults(second);
+        assert.deepEqual(await ids(), [first.id, second.id]);
+        await denied([recognition(first, literal), recognition(second)]);
+        for (const row of [first, second]) {
+          const entry = page.locator(`[data-triage-id="${row.id}"]`);
+          assert.equal(await entry.locator('h3').textContent(), `${row.id} · ${row.title}`);
+          assert.equal(await entry.locator('p').textContent(), `${row.service} · ${human(row.severity)} · ${human(row.status)} · Opened ${utc(row.openedAt)}`);
+          await open(row.id).click(); await detail(row);
+          assert.equal(await add(row.id).isDisabled(), true);
+          await add(row.id).evaluate(button => { button.click(); button.click(); }); await close();
+          assert.equal(await focused(open(row.id)), true);
+        }
+        assert.deepEqual(await ids(), [first.id, second.id]);
+        assert.equal(await note(first.id).inputValue(), literal);
+        await note(first.id).fill(edited);
+        await note(second.id).fill('second <b>literal</b> & note');
+        await search('Search'); await results('Search');
+        const snapshot = await page.locator('#rows').textContent();
+        await open(first.id).click(); await detail(first); await close();
+        assert.equal(await page.locator('#rows').textContent(), snapshot);
+        assert.deepEqual(await ids(), [first.id, second.id]);
+        assert.equal(await note(first.id).inputValue(), edited);
+        assert.equal(await note(second.id).inputValue(), 'second <b>literal</b> & note');
+        assert.equal(await page.locator('#triage-list script, #triage-list img, #triage-list b').count(), 0);
+        assert.equal(await page.evaluate(() => window.triageInjected), undefined);
+        await denied([recognition(first, edited), recognition(second, 'second <b>literal</b> & note')]);
+        assert.equal(await page.locator('#triage-storage-message').isVisible(), true);
+        assert.equal(new URL(page.url()).searchParams.get('q'), 'Search');
+        assert.ok(!page.url().includes('triage') && !address.includes('triage'));
+        t.diagnostic(`Native quota exhaustion: ${quota.count} filler keys; exact triage setItem denied before additions and after visit edits; reads remained available. No reload persistence asserted during denial.`);
+      } finally {
+        await page.evaluate(() => {
+          for (const key of Object.keys(localStorage)) if (key.startsWith('triage-visit-fill-')) localStorage.removeItem(key);
+        });
+      }
+      // Restore the inherited recovery journey's starting state only after the
+      // unavailable-write condition has ended.
+      await remove(second.id).click(); await note(first.id).fill(editedNote);
+      await search(first.id);
+      assert.deepEqual(await stored(), {version: 1, entries: [recognition(first, editedNote)]});
+    });
+
     await t.test('actual localStorage quota failure retains visit edits and recovers after space is freed', async () => {
       // Real browser storage exhaustion, without patched APIs, flags or HTTP responses.
       const quota = await page.evaluate(() => {
